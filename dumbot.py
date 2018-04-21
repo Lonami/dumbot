@@ -1,6 +1,7 @@
 import json
 import urllib.request
 import urllib.parse
+from collections import UserList
 
 
 class Obj:
@@ -54,8 +55,8 @@ class Bot:
     Class to easily invoke Telegram API's bot methods.
 
     The methods are accessed as if they were functions of the class,
-    and these always return an ``Obj`` instance with ``.ok`` set to
-    either ``True`` or its previous value.
+    and these always return an ``Obj`` or ``UserList`` instance with ``.ok``
+    set to either ``True`` or its previous value.
 
     Keyword arguments are used to construct an ``Obj`` instance to
     save the caller from creating it themselves.
@@ -96,9 +97,14 @@ class Bot:
                 deco = json.loads(data)
                 if deco['ok']:
                     deco = deco['result']
-                    deco['ok'] = deco.get('ok', True)
             except Exception as e:
                 return Obj(ok=False, cause='json', error=e)
             else:
-                return Obj(**deco)
+                if isinstance(deco, list):
+                    obj = UserList((Obj(**x) for x in deco))
+                    obj.ok = True
+                else:
+                    deco['ok'] = deco.get('ok', True)
+                    obj = Obj(**deco)
+                return obj
         return request
