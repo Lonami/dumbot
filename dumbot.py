@@ -106,11 +106,13 @@ class Bot:
             except Exception as e:
                 return Obj(ok=False, cause='json', error=e)
             else:
-                if isinstance(deco, list):
+                if isinstance(deco, dict):
+                    deco['ok'] = deco.get('ok', True)
+                    obj = Obj(**deco)
+                elif isinstance(deco, list):
                     obj = UserList((Obj(**x) for x in deco))
                     obj.ok = True
                 else:
-                    deco['ok'] = deco.get('ok', True)
-                    obj = Obj(**deco)
+                    obj = deco
                 return obj
         return request
