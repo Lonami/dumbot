@@ -36,6 +36,12 @@ class Obj:
             self.__dict__[name] = obj
         return obj
 
+    def __getitem__(self, key):
+        return getattr(self, key if isinstance(key, str) else str(key))
+
+    def __setitem__(self, key, value):
+        return setattr(self, key if isinstance(key, str) else str(key), value)
+
     def __str__(self):
         return str(self.to_dict())
 
