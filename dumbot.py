@@ -17,16 +17,16 @@ class Obj:
         >>>
 
     If you expect a different type you should use ``or value``, as
-    empty ``Obj`` instances are considered to be ``False``.
+    empty `Obj` instances are considered to be ``False``.
 
-    You can convert ``Obj`` instances back to ``dict`` with ``.to_dict()``.
+    You can convert `Obj` instances back to ``dict`` with `.to_dict()`.
 
     If a member name is a reserved keyword, like ``from``, add a trailing
     underscore, like ``from_``.
     """
     def __init__(self, **kwargs):
-        self.__dict__ = {k: Obj(**v) if isinstance(v, dict) else v
-                         for k, v in kwargs.items()}
+        self.__dict__ = {k: Obj(**v) if isinstance(v, dict) else (
+            Lst(v) if isinstance(v, list) else v) for k, v in kwargs.items()}
 
     def __getattr__(self, name):
         name = name.rstrip('_')
@@ -35,12 +35,6 @@ class Obj:
             obj = Obj()
             self.__dict__[name] = obj
         return obj
-
-    def __getitem__(self, key):
-        return getattr(self, key if isinstance(key, str) else str(key))
-
-    def __setitem__(self, key, value):
-        return setattr(self, key if isinstance(key, str) else str(key), value)
 
     def __str__(self):
         return str(self.to_dict())
@@ -56,15 +50,25 @@ class Obj:
                 for k, v in self.__dict__.items()}
 
 
+class Lst(Obj, UserList):
+    """
+    Like `Obj` but for lists.
+    """
+    def __init__(self, original):
+        Obj.__init__(self)
+        UserList.__init__(self, (Obj(**x) if isinstance(x, dict) else (
+            Lst(x) if isinstance(x, list) else x) for x in original))
+
+
 class Bot:
     """
     Class to easily invoke Telegram API's bot methods.
 
     The methods are accessed as if they were functions of the class,
-    and these always return an ``Obj`` or ``UserList`` instance with ``.ok``
+    and these always return an `Obj` or `Lst` instance with ``.ok``
     set to either ``True`` or its previous value.
 
-    Keyword arguments are used to construct an ``Obj`` instance to
+    Keyword arguments are used to construct an `Obj` instance to
     save the caller from creating it themselves.
 
     For instance:
@@ -110,7 +114,7 @@ class Bot:
                     deco['ok'] = deco.get('ok', True)
                     obj = Obj(**deco)
                 elif isinstance(deco, list):
-                    obj = UserList((Obj(**x) for x in deco))
+                    obj = Lst(deco)
                     obj.ok = True
                 else:
                     obj = deco
