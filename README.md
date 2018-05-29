@@ -14,3 +14,9 @@ if msg.ok:
 else:
     print('something went wrong!', msg)
 ```
+
+# asyncio
+no async http stdlib for python, `pip install aiohttp [cchardet aiodns]`.
+
+# faq
+* why is code duplicated? so you can just pull the file you need.

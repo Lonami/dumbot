@@ -1,6 +1,4 @@
-import json
-import urllib.request
-import urllib.parse
+import aiohttp
 from collections import UserList
 
 
@@ -72,9 +70,11 @@ class Bot:
     save the caller from creating it themselves.
 
     For instance:
+        >>> import asyncio
+        >>> rc = asyncio.get_event_loop().run_until_complete
         >>> bot = Bot(...)
         >>> print(bot.getMe())
-        >>> message = bot.sendMessage(chat_id=10885151, text='Hi Lonami!')
+        >>> message = rc(bot.sendMessage(chat_id=10885151, text='Hi Lonami!'))
         >>> if message.ok:
         ...     print(message.chat.first_name)
         ...
@@ -85,17 +85,16 @@ class Bot:
         self.timeout = timeout
 
     def __getattr__(self, method_name):
-        def request(**kwargs):
-            obj = json.dumps(Obj(**kwargs).to_dict()).encode('utf-8')
+        async def request(**kwargs):
             url = 'https://api.telegram.org/bot{}/{}'\
                   .format(self.token, method_name)
             try:
-                r = urllib.request.urlopen(urllib.request.Request(
-                    url, headers={'Content-Type': 'application/json'}
-                ), data=obj, timeout=self.timeout)
-                deco = json.loads(str(r.read(), encoding='utf-8'))
-                if deco['ok']:
-                    deco = deco['result']
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                            url, json=kwargs, timeout=self.timeout) as r:
+                        deco = await r.json()
+                        if deco['ok']:
+                            deco = deco['result']
             except Exception as e:
                 return Obj(ok=False, error_code=-1,
                            description=str(e), error=e)
