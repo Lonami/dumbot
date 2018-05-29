@@ -109,3 +109,6 @@ class Bot:
                     obj = deco
                 return obj
         return request
+
+
+__all__ = ['Obj', 'Lst', 'Bot']
