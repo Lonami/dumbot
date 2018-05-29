@@ -94,21 +94,25 @@ class Bot:
                     url, headers={'Content-Type': 'application/json'}
                 ), data=obj, timeout=self.timeout)
             except Exception as e:
-                return Obj(ok=False, cause='conn', error=e)
+                return Obj(ok=False, error_code=-1,
+                           description=str(e), error=e)
             try:
                 resp = reqs.read()
             except Exception as e:
-                return Obj(ok=False, cause='read', error=e)
+                return Obj(ok=False, error_code=-2,
+                           description=str(e), error=e)
             try:
                 data = str(resp, encoding='utf-8')
             except Exception as e:
-                return Obj(ok=False, cause='utf8', error=e)
+                return Obj(ok=False, error_code=-3,
+                           description=str(e), error=e)
             try:
                 deco = json.loads(data)
                 if deco['ok']:
                     deco = deco['result']
             except Exception as e:
-                return Obj(ok=False, cause='json', error=e)
+                return Obj(ok=False, error_code=-4,
+                           description=str(e), error=e)
             else:
                 if isinstance(deco, dict):
                     deco['ok'] = deco.get('ok', True)
