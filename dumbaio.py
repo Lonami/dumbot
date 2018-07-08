@@ -1,3 +1,4 @@
+import sys
 import aiohttp
 from collections import UserList
 
@@ -83,18 +84,18 @@ class Bot:
     def __init__(self, token, timeout=10):
         self.token = token
         self.timeout = timeout
+        self._session = aiohttp.ClientSession()
 
     def __getattr__(self, method_name):
         async def request(**kwargs):
             url = 'https://api.telegram.org/bot{}/{}'\
                   .format(self.token, method_name)
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                            url, json=kwargs, timeout=self.timeout) as r:
-                        deco = await r.json()
-                        if deco['ok']:
-                            deco = deco['result']
+                async with self._session.post(
+                        url, json=kwargs, timeout=self.timeout) as r:
+                    deco = await r.json()
+                    if deco['ok']:
+                        deco = deco['result']
             except Exception as e:
                 return Obj(ok=False, error_code=-1,
                            description=str(e), error=e)
@@ -110,5 +111,14 @@ class Bot:
                 return obj
         return request
 
+    def __del__(self):
+        if '_session' in self.__dict__:
+            try:
+                if not self._session.closed:
+                    if self._session._connector_owner:
+                        self._session._connector.close()
+                    self._session._connector = None
+            except Exception as e:
+                print('Failed to close connector', repr(e), e, file=sys.stderr)
 
 __all__ = ['Obj', 'Lst', 'Bot']
