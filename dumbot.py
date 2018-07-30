@@ -1,6 +1,7 @@
-import json
-import urllib.request
-import urllib.parse
+import io
+import sys
+import asyncio
+import aiohttp
 from collections import UserList
 
 
@@ -72,30 +73,56 @@ class Bot:
     save the caller from creating it themselves.
 
     For instance:
+        >>> import asyncio
+        >>> rc = asyncio.get_event_loop().run_until_complete
         >>> bot = Bot(...)
         >>> print(bot.getMe())
-        >>> message = bot.sendMessage(chat_id=10885151, text='Hi Lonami!')
+        >>> message = rc(bot.sendMessage(chat_id=10885151, text='Hi Lonami!'))
         >>> if message.ok:
         ...     print(message.chat.first_name)
         ...
         >>>
     """
-    def __init__(self, token, timeout=10):
+    def __init__(self, token, *, timeout=10, loop=None):
         self.token = token
         self.timeout = timeout
+        self._session = aiohttp.ClientSession(
+            loop=loop or asyncio.get_event_loop())
 
     def __getattr__(self, method_name):
-        def request(**kwargs):
-            obj = json.dumps(Obj(**kwargs).to_dict()).encode('utf-8')
+        async def request(**kwargs):
+            fp = None
+            file = kwargs.pop('file', None)
+            if not file:
+                json = kwargs
+                data = None
+            else:
+                json = None
+                data = aiohttp.FormData()
+                for k, v in kwargs.items():
+                    data.add_field(k, str(v) if isinstance(v, int) else v)
+
+                if not isinstance(file['file'], (
+                        io.IOBase, bytes, bytearray, memoryview)):
+                    file['file'] = fp = open(file['file'], 'rb')
+
+                data.add_field(
+                    file['type'],
+                    file['file'],
+                    filename=file.get('name'),
+                    content_type=file.get('mime')
+                )
+
             url = 'https://api.telegram.org/bot{}/{}'\
                   .format(self.token, method_name)
             try:
-                r = urllib.request.urlopen(urllib.request.Request(
-                    url, headers={'Content-Type': 'application/json'}
-                ), data=obj, timeout=self.timeout)
-                deco = json.loads(str(r.read(), encoding='utf-8'))
-                if deco['ok']:
-                    deco = deco['result']
+                async with self._session.post(url,
+                                              json=json,
+                                              data=data,
+                                              timeout=self.timeout) as r:
+                    deco = await r.json()
+                    if deco['ok']:
+                        deco = deco['result']
             except Exception as e:
                 return Obj(ok=False, error_code=-1,
                            description=str(e), error=e)
@@ -109,7 +136,20 @@ class Bot:
                 else:
                     obj = deco
                 return obj
+            finally:
+                if fp:
+                    fp.close()
+
         return request
 
+    def __del__(self):
+        if '_session' in self.__dict__:
+            try:
+                if not self._session.closed:
+                    if self._session._connector_owner:
+                        self._session._connector.close()
+                    self._session._connector = None
+            except Exception as e:
+                print('Failed to close connector', repr(e), e, file=sys.stderr)
 
 __all__ = ['Obj', 'Lst', 'Bot']
