@@ -13,6 +13,14 @@ if msg.ok:
     print('msg sent', msg)
 else:
     print('something went wrong!', msg)
+
+bot.sendDocument(chat_id=10885151, file=dict(
+    type='document',
+    file='/home/lonami/holiday',
+    # These are optional and will be inferred from file if unspecified
+    name='My Favourite Photo.jpg',
+    mime='image/jpeg'
+))
 ```
 
 # asyncio

@@ -1,4 +1,6 @@
+import io
 import sys
+import asyncio
 import aiohttp
 from collections import UserList
 
@@ -81,18 +83,43 @@ class Bot:
         ...
         >>>
     """
-    def __init__(self, token, timeout=10):
+    def __init__(self, token, *, timeout=10, loop=None):
         self.token = token
         self.timeout = timeout
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession(
+            loop=loop or asyncio.get_event_loop())
 
     def __getattr__(self, method_name):
         async def request(**kwargs):
+            fp = None
+            file = kwargs.pop('file', None)
+            if not file:
+                json = kwargs
+                data = None
+            else:
+                json = None
+                data = aiohttp.FormData()
+                for k, v in kwargs.items():
+                    data.add_field(k, str(v) if isinstance(v, int) else v)
+
+                if not isinstance(file['file'], (
+                        io.IOBase, bytes, bytearray, memoryview)):
+                    file['file'] = fp = open(file['file'], 'rb')
+
+                data.add_field(
+                    file['type'],
+                    file['file'],
+                    filename=file.get('name'),
+                    content_type=file.get('mime')
+                )
+
             url = 'https://api.telegram.org/bot{}/{}'\
                   .format(self.token, method_name)
             try:
-                async with self._session.post(
-                        url, json=kwargs, timeout=self.timeout) as r:
+                async with self._session.post(url,
+                                              json=json,
+                                              data=data,
+                                              timeout=self.timeout) as r:
                     deco = await r.json()
                     if deco['ok']:
                         deco = deco['result']
@@ -109,6 +136,10 @@ class Bot:
                 else:
                     obj = deco
                 return obj
+            finally:
+                if fp:
+                    fp.close()
+
         return request
 
     def __del__(self):
