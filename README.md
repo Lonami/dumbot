@@ -12,6 +12,8 @@ then simply add `dumbot.py` to your project.
 
 
 # usage
+
+### basic
 ```python
 import asyncio
 from dumbot import Bot
@@ -25,13 +27,48 @@ async def main():
     else:
         print('something went wrong!', msg)
 
+loop = asyncio.get_event_loop()
+loop.run_until_complete(main())
+```
+
+### files
+```python
+
+async def main():
+    ...
     await bot.sendDocument(chat_id=10885151, file=dict(
         type='document',
         file='/home/lonami/holiday.jpg'
     ))
+```
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(main())
+### updates
+```python
+async def on_update(bot, update):
+    await self.sendMessage(
+        chat_id=update.message.chat.id,
+        text=update.message.text[::-1]
+    )
+
+
+...
+bot.on_update = on_update
+bot.run()
+```
+
+### subclassing
+```python
+class Subbot(Bot):
+    async def init(self):
+        self.me = await self.getMe()
+
+    async def on_update(self, update):
+        await self.sendMessage(
+            chat_id=update.message.chat.id,
+            text='i am alive'
+        )
+
+Subbot(token).run()
 ```
 
 # extra

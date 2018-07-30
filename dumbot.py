@@ -1,8 +1,9 @@
-import io
-import sys
 import asyncio
-import aiohttp
+import io
+import logging
 from collections import UserList
+
+import aiohttp
 
 
 class Obj:
@@ -83,11 +84,16 @@ class Bot:
         ...
         >>>
     """
-    def __init__(self, token, *, timeout=10, loop=None):
-        self.token = token
-        self.timeout = timeout
+    def __init__(self, token, *, timeout=10, loop=None, sequential=False):
+        self._token = token
+        self._timeout = timeout
+        self._last_update = 0
+        self._sequential = sequential
         self._session = aiohttp.ClientSession(
             loop=loop or asyncio.get_event_loop())
+
+        self._log = logging.getLogger(
+            'dumbot{}'.format(token[:token.index(':')]))
 
     def __getattr__(self, method_name):
         async def request(**kwargs):
@@ -114,12 +120,12 @@ class Bot:
                 )
 
             url = 'https://api.telegram.org/bot{}/{}'\
-                  .format(self.token, method_name)
+                  .format(self._token, method_name)
             try:
                 async with self._session.post(url,
                                               json=json,
                                               data=data,
-                                              timeout=self.timeout) as r:
+                                              timeout=self._timeout) as r:
                     deco = await r.json()
                     if deco['ok']:
                         deco = deco['result']
@@ -142,6 +148,52 @@ class Bot:
 
         return request
 
+    async def init(self):
+        pass
+
+    def run(self):
+        if self._session.loop.is_running():
+            return self._run()
+        else:
+            return self._session.loop.run_until_complete(self._run())
+
+    async def _run(self):
+        try:
+            await self.init()
+            while not self._session.closed:
+                updates = await self.getUpdates(
+                    offset=self._last_update + 1, timeout=self._timeout)
+                if not updates.ok:
+                    self._log.warning('update result was not ok %s', updates)
+                    continue
+                if not updates.data:
+                    continue
+
+                self._last_update = updates.data[-1].update_id
+                if self._sequential:
+                    for update in updates.data:
+                        await self._on_update(update)
+                else:
+                    for update in updates.data:
+                        asyncio.ensure_future(self._on_update(update))
+
+        except KeyboardInterrupt:
+            pass
+        finally:
+            await self.disconnect()
+
+    async def _on_update(self, update):
+        try:
+            await self.on_update(update)
+        except Exception:
+            self._log.exception('unhandled exception handling %s', update)
+
+    async def on_update(self, update):
+        pass
+
+    async def disconnect(self):
+        await self._session.close()
+
     def __del__(self):
         if '_session' in self.__dict__:
             try:
@@ -149,7 +201,7 @@ class Bot:
                     if self._session._connector_owner:
                         self._session._connector.close()
                     self._session._connector = None
-            except Exception as e:
-                print('Failed to close connector', repr(e), e, file=sys.stderr)
+            except Exception:
+                self._log.exception('failed to close connector')
 
 __all__ = ['Obj', 'Lst', 'Bot']
