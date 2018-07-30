@@ -5,6 +5,11 @@ from collections import UserList
 
 import aiohttp
 
+try:
+    import ujson as json_mod
+except ImportError:
+    import json as json_mod
+
 
 class Obj:
     """
@@ -90,7 +95,9 @@ class Bot:
         self._last_update = 0
         self._sequential = sequential
         self._session = aiohttp.ClientSession(
-            loop=loop or asyncio.get_event_loop())
+            loop=loop or asyncio.get_event_loop(),
+            json_serialize=json_mod.dumps
+        )
 
         self._log = logging.getLogger(
             'dumbot{}'.format(token[:token.index(':')]))

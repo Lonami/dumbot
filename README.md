@@ -75,6 +75,9 @@ Subbot(token).run()
 if you're concerned about speed you can `pip install cchardet aiodns`
 as suggested in https://docs.aiohttp.org/en/stable/index.html.
 
+you may also want to `pip install ujson`
+to faster serialize outgoing requests.
+
 # faq
 
 ### what methods are available?
