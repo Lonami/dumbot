@@ -44,12 +44,11 @@ async def main():
 
 ### updates
 ```python
-async def on_update(bot, update):
-    await self.sendMessage(
+async def on_update(update):
+    await bot.sendMessage(
         chat_id=update.message.chat.id,
         text=update.message.text[::-1]
     )
-
 
 ...
 bot.on_update = on_update
@@ -65,7 +64,7 @@ class Subbot(Bot):
     async def on_update(self, update):
         await self.sendMessage(
             chat_id=update.message.chat.id,
-            text='i am alive'
+            text='i am {}'.format(self.me.username)
         )
 
 Subbot(token).run()
