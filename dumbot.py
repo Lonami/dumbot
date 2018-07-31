@@ -181,7 +181,9 @@ class Bot:
                 updates = await self.getUpdates(
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
-                    self._log.warning('update result was not ok %s', updates)
+                    if not isinstance(updates.error, asyncio.TimeoutError):
+                        self._log.warning('update result was not ok %s',
+                                          updates)
                     continue
                 if not updates.data:
                     continue
