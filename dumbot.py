@@ -37,11 +37,21 @@ class Obj:
 
     def __getattr__(self, name):
         name = name.rstrip('_')
-        obj = self.__dict__.get(name, None)
+        obj = self.__dict__.get(name)
         if obj is None:
             obj = Obj()
             self.__dict__[name] = obj
         return obj
+
+    def __getitem__(self, name):
+        obj = self.__dict__.get(name)
+        if obj is None:
+            obj = Obj()
+            self.__dict__[name] = obj
+        return obj
+
+    def __setitem__(self, key, value):
+        self.__dict__[key] = value
 
     def __str__(self):
         return str(self.to_dict())
