@@ -1,7 +1,6 @@
 import asyncio
 import io
 import logging
-from collections import UserList
 
 import aiohttp
 
@@ -53,6 +52,9 @@ class Obj:
     def __setitem__(self, key, value):
         self.__dict__[key] = value
 
+    def __iter__(self):
+        return iter(())
+
     def __str__(self):
         return str(self.to_dict())
 
@@ -67,13 +69,13 @@ class Obj:
                 for k, v in self.__dict__.items()}
 
 
-class Lst(Obj, UserList):
+class Lst(Obj, list):
     """
     Like `Obj` but for lists.
     """
     def __init__(self, original):
         Obj.__init__(self)
-        UserList.__init__(self, (Obj(**x) if isinstance(x, dict) else (
+        list.__init__(self, (Obj(**x) if isinstance(x, dict) else (
             Lst(x) if isinstance(x, list) else x) for x in original))
 
 
