@@ -64,6 +64,12 @@ class Obj:
     def __bool__(self):
         return bool(self.__dict__)
 
+    def __contains__(self, item):
+        return item in self.__dict__
+
+    def __call__(self, *a, **kw):
+        return Obj()
+
     def to_dict(self):
         return {k: v.to_dict() if isinstance(v, Obj) else v
                 for k, v in self.__dict__.items()}
