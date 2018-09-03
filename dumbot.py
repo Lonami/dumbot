@@ -69,14 +69,28 @@ class Obj:
                 for k, v in self.__dict__.items()}
 
 
-class Lst(Obj, list):
+class Lst(list):
     """
     Like `Obj` but for lists.
     """
-    def __init__(self, original):
-        Obj.__init__(self)
+    def __init__(self, iterable=()):
         list.__init__(self, (Obj(**x) if isinstance(x, dict) else (
-            Lst(x) if isinstance(x, list) else x) for x in original))
+            Lst(x) if isinstance(x, list) else x) for x in iterable))
+
+    def __getattr__(self, name):
+        name = name.rstrip('_')
+        obj = self.__dict__.get(name)
+        if obj is None:
+            obj = Obj()
+            self.__dict__[name] = obj
+        return obj
+
+    def __repr__(self):
+        return super().__repr__() + repr(self.to_dict())
+
+    def to_dict(self):
+        return {k: v.to_dict() if isinstance(v, Obj) else v
+                for k, v in self.__dict__.items()}
 
 
 class Bot:
@@ -187,15 +201,15 @@ class Bot:
                         self._log.warning('update result was not ok %s',
                                           updates)
                     continue
-                if not updates.data:
+                if not updates:
                     continue
 
-                self._last_update = updates.data[-1].update_id
+                self._last_update = updates[-1].update_id
                 if self._sequential:
-                    for update in updates.data:
+                    for update in updates:
                         await self._on_update(update)
                 else:
-                    for update in updates.data:
+                    for update in updates:
                         asyncio.ensure_future(self._on_update(update))
 
         except KeyboardInterrupt:
@@ -224,5 +238,6 @@ class Bot:
                     self._session._connector = None
             except Exception:
                 self._log.exception('failed to close connector')
+
 
 __all__ = ['Obj', 'Lst', 'Bot']
