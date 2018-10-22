@@ -94,7 +94,7 @@ class Obj:
         return Obj()
 
     def to_dict(self):
-        return {k: v.to_dict() if isinstance(v, Obj) else v
+        return {k: v.to_dict() if isinstance(v, (Obj, Lst)) else v
                 for k, v in self.__dict__.items()}
 
 
@@ -118,8 +118,8 @@ class Lst(list):
         return super().__repr__() + repr(self.to_dict())
 
     def to_dict(self):
-        return {k: v.to_dict() if isinstance(v, Obj) else v
-                for k, v in self.__dict__.items()}
+        return [v.to_dict() if isinstance(v, (Obj, Lst)) else v
+                for v in self]
 
 
 class Bot:
