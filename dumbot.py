@@ -232,7 +232,7 @@ class Bot:
     async def _run(self):
         try:
             await self.init()
-            while not self._session.closed:
+            while self._running:
                 updates = await self.getUpdates(
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
@@ -255,6 +255,10 @@ class Bot:
             pass
         finally:
             await self.disconnect()
+
+    @property
+    def _running(self):
+        return not self._session.closed
 
     async def _on_update(self, update):
         try:
