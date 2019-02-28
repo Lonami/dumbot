@@ -149,8 +149,9 @@ class Bot:
         self._timeout = timeout
         self._last_update = 0
         self._sequential = sequential
+        self._loop = loop or asyncio.get_event_loop()
         self._session = aiohttp.ClientSession(
-            loop=loop or asyncio.get_event_loop(),
+            loop=self._loop,
             json_serialize=json_mod.dumps
         )
 
@@ -223,10 +224,10 @@ class Bot:
         pass
 
     def run(self):
-        if self._session.loop.is_running():
+        if self._loop.is_running():
             return self._run()
         else:
-            return self._session.loop.run_until_complete(self._run())
+            return self._loop.run_until_complete(self._run())
 
     async def _run(self):
         try:
@@ -248,7 +249,7 @@ class Bot:
                         await self._on_update(update)
                 else:
                     for update in updates:
-                        asyncio.ensure_future(self._on_update(update))
+                        self._loop.create_task(self._on_update(update))
 
         except KeyboardInterrupt:
             pass
