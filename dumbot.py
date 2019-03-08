@@ -287,5 +287,11 @@ class Bot:
         except Exception:
             self._log.exception('failed to close connector')
 
+    async def __aenter__(self):
+        await self._init()
+
+    async def __aexit__(self, *args):
+        await self.disconnect()
+
 
 __all__ = ['Obj', 'Lst', 'Bot']
