@@ -150,6 +150,7 @@ class Bot:
         self._last_update = 0
         self._sequential = sequential
         self._loop = loop or asyncio.get_event_loop()
+        self._me = None
         self._session = aiohttp.ClientSession(
             loop=self._loop,
             json_serialize=json_mod.dumps
@@ -223,6 +224,10 @@ class Bot:
     async def init(self):
         pass
 
+    async def _init(self):
+        self._me = await self.getMe()
+        await self.init()
+
     def run(self):
         if self._loop.is_running():
             return self._run()
@@ -231,7 +236,7 @@ class Bot:
 
     async def _run(self):
         try:
-            await self.init()
+            await self._init()
             while self._running:
                 updates = await self.getUpdates(
                     offset=self._last_update + 1, timeout=self._timeout)
