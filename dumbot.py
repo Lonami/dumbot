@@ -151,11 +151,7 @@ class Bot:
         self._sequential = sequential
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
-        self._session = aiohttp.ClientSession(
-            loop=self._loop,
-            json_serialize=json_mod.dumps
-        )
-
+        self._session = None
         self._log = logging.getLogger(
             'dumbot{}'.format(token[:token.index(':')]))
 
@@ -225,6 +221,10 @@ class Bot:
         pass
 
     async def _init(self):
+        self._session = aiohttp.ClientSession(
+            loop=self._loop,
+            json_serialize=json_mod.dumps
+        )
         self._me = await self.getMe()
         await self.init()
 
@@ -263,7 +263,7 @@ class Bot:
 
     @property
     def _running(self):
-        return not self._session.closed
+        return self._session and not self._session.closed
 
     async def _on_update(self, update):
         try:
@@ -276,16 +276,16 @@ class Bot:
 
     async def disconnect(self):
         await self._session.close()
+        self._session = None
 
     def __del__(self):
-        if '_session' in self.__dict__:
-            try:
-                if not self._session.closed:
-                    if self._session._connector_owner:
-                        self._session._connector.close()
-                    self._session._connector = None
-            except Exception:
-                self._log.exception('failed to close connector')
+        try:
+            if self._session and not self._session.closed:
+                if self._session._connector_owner:
+                    self._session._connector.close()
+                self._session._connector = None
+        except Exception:
+            self._log.exception('failed to close connector')
 
 
 __all__ = ['Obj', 'Lst', 'Bot']
