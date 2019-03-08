@@ -259,7 +259,7 @@ class Bot:
         except KeyboardInterrupt:
             pass
         finally:
-            await self.disconnect()
+            await self._disconnect()
 
     @property
     def _running(self):
@@ -275,6 +275,14 @@ class Bot:
         pass
 
     async def disconnect(self):
+        pass
+
+    async def _disconnect(self):
+        try:
+            await self.disconnect()
+        except Exception:
+            self._log.exception('unexpected error in subclassed disconnect')
+
         await self._session.close()
         self._session = None
 
@@ -291,7 +299,7 @@ class Bot:
         await self._init()
 
     async def __aexit__(self, *args):
-        await self.disconnect()
+        await self._disconnect()
 
 
 __all__ = ['Obj', 'Lst', 'Bot']
