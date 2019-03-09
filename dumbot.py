@@ -23,8 +23,8 @@ SOFTWARE.
 """
 import asyncio
 import io
-import itertools
 import logging
+import re
 
 import aiohttp
 
@@ -124,6 +124,7 @@ class Lst(list):
 
 
 _cmd_attr_name = 'dumbot.cmd'
+_inb_attr_name = 'dumbot.inb'
 
 
 def cmd(item=None):
@@ -148,6 +149,26 @@ def cmd(item=None):
         return func
 
     return decorator(item) if callable(item) else decorator
+
+
+def inline_button(pattern):
+    """
+    Marks the decorated function as an inline button's data callback.
+    Unlike `cmd` the pattern must always be given because it's a regex.
+
+    >>> import dumbot
+    >>>
+    >>> class Bot(dumbot.Bot):
+    >>>     @dumbot.inline_button(r'day(\d+)')
+    >>>     async def select_day(self, update, match):
+    >>>         await self.sendMessage(chat_id=update.message.chat.id,
+    >>>                                text=f'Selected day {match.group(1)}')
+    """
+    def decorator(func):
+        setattr(func, _inb_attr_name, re.compile(pattern + '$').match)
+        return func
+
+    return decorator
 
 
 class Bot:
@@ -181,6 +202,7 @@ class Bot:
         self._me = None
         self._session = None
         self._cmd_triggers = {}
+        self._inb_triggers = []
         self._log = logging.getLogger(
             'dumbot{}'.format(token[:token.index(':')]))
 
@@ -256,6 +278,7 @@ class Bot:
         )
         self._me = await self.getMe()
         self._cmd_triggers.clear()
+        self._inb_triggers.clear()
         self._add_commands(self, self)
         await self.init()
 
@@ -264,9 +287,13 @@ class Bot:
         Registers all the functions in the given instance or modules.
         """
         def add_cmd(to):
-            command = getattr(to, _cmd_attr_name, None)
-            if command:
-                self._cmd_triggers[command] = to
+            trigger = getattr(to, _cmd_attr_name, None)
+            if trigger:
+                self._cmd_triggers[trigger] = to
+            else:
+                trigger = getattr(to, _inb_attr_name, None)
+                if trigger:
+                    self._inb_triggers.append((trigger, to))
 
         for item in items:
             if not add_cmd(item):
@@ -312,6 +339,21 @@ class Bot:
 
     async def _on_update(self, update):
         try:
+            cq = update.callback_query
+            if cq:
+                cb, match = self._get_inb(cq.data)
+                if cb:
+                    await cb(update, match)
+                else:
+                    await self.on_update(update)
+
+                # Always answer callback queries *after* user's callback
+                # to stop the spinning progress bar. This will do nothing
+                # if the user already answered it themselves with another
+                # parameters, so it's good practice and very convenient.
+                await self.answerCallbackQuery(callback_query_id=cq.id)
+                return
+
             cb = self._get_cmd(update.message) or self.on_update
             await cb(update)
         except Exception:
@@ -332,6 +374,14 @@ class Bot:
                 return self._cmd_triggers.get(cmd)
             elif cmd[usr + 1:] == self._me.username.lower():
                 return self._cmd_triggers.get(cmd[:usr])
+
+    def _get_inb(self, data):
+        for trigger, func in self._inb_triggers:
+            match = trigger(data)
+            if match:
+                return func, match
+
+        return None, None
 
     async def disconnect(self):
         pass
