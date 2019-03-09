@@ -23,6 +23,7 @@ SOFTWARE.
 """
 import asyncio
 import io
+import itertools
 import logging
 
 import aiohttp
@@ -122,6 +123,73 @@ class Lst(list):
                 for v in self]
 
 
+class Cmd:
+    """
+    Marks the decorated function as a command callback.
+    If no text is given, the function's name is used as `/name`.
+
+    >>> import dumbot
+    >>>
+    >>> class Bot(dumbot.Bot):
+    >>>     async def init(self):
+    >>>         dumbot.Cmd.register(self)
+    >>>
+    >>>     @dumbot.Cmd('start')
+    >>>     async def start(self, update):
+    >>>         await self.sendMessage(chat_id=update.message.chat.id, text='Hey!')
+    >>>
+    >>>     @dumbot.Cmd
+    >>>     async def help(self, update):
+    >>>         await self.sendMessage(chat_id=update.message.chat.id, text='No help')
+    """
+    _attr_name = 'dumbot.cmd'
+
+    def __new__(cls, item=None):
+        def decorator(func):
+            setattr(func, cls._attr_name,
+                    item if isinstance(item, str) else func.__name__)
+            return func
+
+        return decorator(item) if callable(item) else decorator
+
+    @classmethod
+    def register(cls, bot, *items):
+        """
+        Registers all the functions in the given instance or modules.
+        """
+        attr_name = cls._attr_name
+
+        def add_cmd(to):
+            cmd = getattr(to, attr_name, None)
+            if cmd:
+                bot._cmd_triggers[cmd] = to
+
+        for item in itertools.chain([bot], items):
+            if not add_cmd(item):
+                for name in dir(item):
+                    add_cmd(getattr(item, name))
+
+    def __contains__(self, item):
+        """
+        Checks whether the given text or function is a command.
+        """
+        if callable(item):
+            return item in self._cb_to_text
+        else:
+            return item in self._text_to_cb
+
+    def __getitem__(self, item):
+        """
+        If a text is given, returns its callback functions.
+
+        If a callback function is given, returns the commands it responds to.
+        """
+        if callable(item):
+            return item in self._cb_to_text[item]
+        else:
+            return item in self._text_to_cb
+
+
 class Bot:
     """
     Class to easily invoke Telegram API's bot methods.
@@ -152,6 +220,7 @@ class Bot:
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
         self._session = None
+        self._cmd_triggers = {}
         self._log = logging.getLogger(
             'dumbot{}'.format(token[:token.index(':')]))
 
@@ -267,12 +336,26 @@ class Bot:
 
     async def _on_update(self, update):
         try:
-            await self.on_update(update)
+            cb = self._get_cmd(update.message) or self.on_update
+            await cb(update)
         except Exception:
             self._log.exception('unhandled exception handling %s', update)
 
     async def on_update(self, update):
         pass
+
+    def _get_cmd(self, msg):
+        if not self._cmd_triggers:
+            return
+
+        ent = msg.entities[0]
+        if ent.offset == 0 and ent.type == 'bot_command':
+            cmd = msg.text[1:ent.length]
+            usr = cmd.find('@')
+            if usr == -1:
+                return self._cmd_triggers.get(cmd)
+            elif cmd[usr + 1:].lower() == self._me.username.lower():
+                return self._cmd_triggers.get(cmd[:usr])
 
     async def disconnect(self):
         pass
