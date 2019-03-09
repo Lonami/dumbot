@@ -127,7 +127,7 @@ _cmd_attr_name = 'dumbot.cmd'
 _inb_attr_name = 'dumbot.inb'
 
 
-def cmd(item=None):
+def command(item=None):
     """
     Marks the decorated function as a command callback.
     If no text is given, the function's name is used as `/name`.
@@ -135,11 +135,11 @@ def cmd(item=None):
     >>> import dumbot
     >>>
     >>> class Bot(dumbot.Bot):
-    >>>     @dumbot.cmd('start')
+    >>>     @dumbot.command('start')
     >>>     async def start(self, update):
     >>>         await self.sendMessage(chat_id=update.message.chat.id, text='Hey!')
     >>>
-    >>>     @dumbot.cmd
+    >>>     @dumbot.command
     >>>     async def help(self, update):
     >>>         await self.sendMessage(chat_id=update.message.chat.id, text='No help')
     """
@@ -154,7 +154,7 @@ def cmd(item=None):
 def inline_button(pattern):
     """
     Marks the decorated function as an inline button's data callback.
-    Unlike `cmd` the pattern must always be given because it's a regex.
+    Unlike `command` the pattern must always be given because it's a regex.
 
     >>> import dumbot
     >>>
