@@ -363,7 +363,7 @@ class Bot:
         pass
 
     def _get_cmd(self, msg):
-        if not self._cmd_triggers:
+        if not self._cmd_triggers or msg.forward_date:
             return
 
         ent = msg.entities[0]
