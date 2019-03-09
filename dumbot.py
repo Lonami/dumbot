@@ -123,7 +123,10 @@ class Lst(list):
                 for v in self]
 
 
-class Cmd:
+_cmd_attr_name = 'dumbot.cmd'
+
+
+def cmd(item=None):
     """
     Marks the decorated function as a command callback.
     If no text is given, the function's name is used as `/name`.
@@ -131,63 +134,20 @@ class Cmd:
     >>> import dumbot
     >>>
     >>> class Bot(dumbot.Bot):
-    >>>     async def init(self):
-    >>>         dumbot.Cmd.register(self)
-    >>>
-    >>>     @dumbot.Cmd('start')
+    >>>     @dumbot.cmd('start')
     >>>     async def start(self, update):
     >>>         await self.sendMessage(chat_id=update.message.chat.id, text='Hey!')
     >>>
-    >>>     @dumbot.Cmd
+    >>>     @dumbot.cmd
     >>>     async def help(self, update):
     >>>         await self.sendMessage(chat_id=update.message.chat.id, text='No help')
     """
-    _attr_name = 'dumbot.cmd'
+    def decorator(func):
+        setattr(func, _cmd_attr_name,
+                item if isinstance(item, str) else func.__name__)
+        return func
 
-    def __new__(cls, item=None):
-        def decorator(func):
-            setattr(func, cls._attr_name,
-                    item if isinstance(item, str) else func.__name__)
-            return func
-
-        return decorator(item) if callable(item) else decorator
-
-    @classmethod
-    def register(cls, bot, *items):
-        """
-        Registers all the functions in the given instance or modules.
-        """
-        attr_name = cls._attr_name
-
-        def add_cmd(to):
-            cmd = getattr(to, attr_name, None)
-            if cmd:
-                bot._cmd_triggers[cmd] = to
-
-        for item in itertools.chain([bot], items):
-            if not add_cmd(item):
-                for name in dir(item):
-                    add_cmd(getattr(item, name))
-
-    def __contains__(self, item):
-        """
-        Checks whether the given text or function is a command.
-        """
-        if callable(item):
-            return item in self._cb_to_text
-        else:
-            return item in self._text_to_cb
-
-    def __getitem__(self, item):
-        """
-        If a text is given, returns its callback functions.
-
-        If a callback function is given, returns the commands it responds to.
-        """
-        if callable(item):
-            return item in self._cb_to_text[item]
-        else:
-            return item in self._text_to_cb
+    return decorator(item) if callable(item) else decorator
 
 
 class Bot:
@@ -295,7 +255,23 @@ class Bot:
             json_serialize=json_mod.dumps
         )
         self._me = await self.getMe()
+        self._cmd_triggers.clear()
+        self._add_commands(self, self)
         await self.init()
+
+    def _add_commands(self, *items):
+        """
+        Registers all the functions in the given instance or modules.
+        """
+        def add_cmd(to):
+            command = getattr(to, _cmd_attr_name, None)
+            if command:
+                self._cmd_triggers[command] = to
+
+        for item in items:
+            if not add_cmd(item):
+                for name in dir(item):
+                    add_cmd(getattr(item, name))
 
     def run(self):
         if self._loop.is_running():
