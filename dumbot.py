@@ -143,8 +143,8 @@ def cmd(item=None):
     >>>         await self.sendMessage(chat_id=update.message.chat.id, text='No help')
     """
     def decorator(func):
-        setattr(func, _cmd_attr_name,
-                item if isinstance(item, str) else func.__name__)
+        setattr(func, _cmd_attr_name, (
+            item if isinstance(item, str) else func.__name__).lower())
         return func
 
     return decorator(item) if callable(item) else decorator
@@ -326,11 +326,11 @@ class Bot:
 
         ent = msg.entities[0]
         if ent.offset == 0 and ent.type == 'bot_command':
-            cmd = msg.text[1:ent.length]
+            cmd = msg.text[1:ent.length].lower()
             usr = cmd.find('@')
             if usr == -1:
                 return self._cmd_triggers.get(cmd)
-            elif cmd[usr + 1:].lower() == self._me.username.lower():
+            elif cmd[usr + 1:] == self._me.username.lower():
                 return self._cmd_triggers.get(cmd[:usr])
 
     async def disconnect(self):
