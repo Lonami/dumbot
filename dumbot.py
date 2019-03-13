@@ -171,6 +171,10 @@ def inline_button(pattern):
     return decorator
 
 
+class UnauthorizedError(ValueError):
+    """Invalid bot token."""
+
+
 class Bot:
     """
     Class to easily invoke Telegram API's bot methods.
@@ -314,6 +318,9 @@ class Bot:
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
                     if not isinstance(updates.error, asyncio.TimeoutError):
+                        if updates.error_code == 401:
+                            raise UnauthorizedError
+
                         self._log.warning('update result was not ok %s',
                                           updates)
                     continue
