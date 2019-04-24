@@ -22,11 +22,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import asyncio
-import io
 import logging
 import re
-
-import aiohttp
+import sys
 
 try:
     import ujson as json_mod
@@ -204,7 +202,10 @@ class Bot:
         self._sequential = sequential
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
-        self._session = None
+        self._reader = None
+        self._writer = None
+        self._running = False
+        self._lock = asyncio.Lock(loop=loop)
         self._cmd_triggers = {}
         self._inb_triggers = []
         self._log = logging.getLogger(
@@ -223,36 +224,45 @@ class Bot:
         async def request(**kwargs):
             fp = None
             file = kwargs.pop('file', None)
-            if not file:
-                json = kwargs
-                data = None
-            else:
-                json = None
-                data = aiohttp.FormData()
-                for k, v in kwargs.items():
-                    data.add_field(k, str(v) if isinstance(v, int) else v)
+            if file:
+                # TODO Implement
+                raise NotImplementedError
 
-                if not isinstance(file['file'], (
-                        io.IOBase, bytes, bytearray, memoryview)):
-                    file['file'] = fp = open(file['file'], 'rb')
-
-                data.add_field(
-                    file['type'],
-                    file['file'],
-                    filename=file.get('name'),
-                    content_type=file.get('mime')
+            if kwargs:
+                data = json_mod.dumps(kwargs, ensure_ascii=True)
+                data_len = (
+                    f'Content-Length: {len(data)}\r\n'
+                    'Content-Type: application/json\r\n'
                 )
+            else:
+                data = ''
+                data_len = ''
 
-            url = 'https://api.telegram.org/bot{}/{}'\
-                  .format(self._token, method_name)
+            # TODO Use a writer/reader pool, or getUpdates kills it
+            async with self._lock:
+                self._writer.write(
+                    f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
+                    'Host: api.telegram.org\r\n'
+                    f'{data_len}'
+                    '\r\n'
+                    f'{data}'.encode('ascii')
+                )
+                await self._writer.drain()
+
+                length = None
+                while True:
+                    line = await self._reader.readline()
+                    if length is None and line.startswith(b'Content-Length:'):
+                        length = int(line[16:-2])
+                    elif line == b'\r\n':
+                        break
+
+                data = await self._reader.read(length)
+
             try:
-                async with self._session.post(url,
-                                              json=json,
-                                              data=data,
-                                              timeout=self._timeout) as r:
-                    deco = await r.json()
-                    if deco['ok']:
-                        deco = deco['result']
+                deco = json_mod.loads(data)
+                if deco['ok']:
+                    deco = deco['result']
             except Exception as e:
                 return Obj(ok=False, error_code=-1,
                            description=str(e), error=e)
@@ -276,10 +286,10 @@ class Bot:
         pass
 
     async def _init(self):
-        self._session = aiohttp.ClientSession(
-            loop=self._loop,
-            json_serialize=json_mod.dumps
-        )
+        self._reader, self._writer = await asyncio.open_connection(
+            'api.telegram.org', 443, loop=self._loop, ssl=True)
+
+        self._running = True
         self._me = await self.getMe()
         self._cmd_triggers.clear()
         self._inb_triggers.clear()
@@ -339,10 +349,6 @@ class Bot:
         finally:
             await self._disconnect()
 
-    @property
-    def _running(self):
-        return self._session and not self._session.closed
-
     async def _on_update(self, update):
         try:
             cq = update.callback_query
@@ -393,22 +399,21 @@ class Bot:
         pass
 
     async def _disconnect(self):
+        if not self._running:
+            return
+
         try:
             await self.disconnect()
         except Exception:
             self._log.exception('unexpected error in subclassed disconnect')
 
-        await self._session.close()
-        self._session = None
+        self._running = False
+        self._writer.close()
+        if sys.version_info >= (3, 7):
+            await self._writer.wait_closed()
 
-    def __del__(self):
-        try:
-            if self._session and not self._session.closed:
-                if self._session._connector_owner:
-                    self._session._connector.close()
-                self._session._connector = None
-        except Exception:
-            self._log.exception('failed to close connector')
+        self._writer = None
+        self._reader = None
 
     async def __aenter__(self):
         await self._init()
