@@ -195,17 +195,18 @@ class Bot:
         ...
         >>>
     """
-    def __init__(self, token, *, timeout=10, loop=None, sequential=False):
+    def __init__(self, token, *, timeout=10,
+                 loop=None, sequential=False, max_connections=2):
         self._token = token
         self._timeout = timeout
         self._last_update = 0
         self._sequential = sequential
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
-        self._reader = None
-        self._writer = None
+        self._streams = [None] * max_connections
+        self._busy_streams = [False] * max_connections
+        self._semaphore = asyncio.Semaphore(max_connections, loop=self._loop)
         self._running = False
-        self._lock = asyncio.Lock(loop=loop)
         self._cmd_triggers = {}
         self._inb_triggers = []
         self._log = logging.getLogger(
@@ -238,26 +239,13 @@ class Bot:
                 data = ''
                 data_len = ''
 
-            # TODO Use a writer/reader pool, or getUpdates kills it
-            async with self._lock:
-                self._writer.write(
-                    f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
-                    'Host: api.telegram.org\r\n'
-                    f'{data_len}'
-                    '\r\n'
-                    f'{data}'.encode('ascii')
-                )
-                await self._writer.drain()
-
-                length = None
-                while True:
-                    line = await self._reader.readline()
-                    if length is None and line.startswith(b'Content-Length:'):
-                        length = int(line[16:-2])
-                    elif line == b'\r\n':
-                        break
-
-                data = await self._reader.read(length)
+            data = await self._request(
+                f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
+                'Host: api.telegram.org\r\n'
+                f'{data_len}'
+                '\r\n'
+                f'{data}'.encode('ascii')
+            )
 
             try:
                 deco = json_mod.loads(data)
@@ -282,13 +270,46 @@ class Bot:
 
         return request
 
+    async def _request(self, data):
+        i = None
+        await self._semaphore.acquire()
+        try:
+            for i, (pair, busy) in enumerate(zip(self._streams, self._busy_streams)):
+                if not busy:
+                    break  # the semaphore guarantees we will break at some point
+
+            self._busy_streams[i] = True
+            if pair is not None:
+                reader, writer = pair
+            else:
+                reader, writer = await asyncio.open_connection(
+                    'api.telegram.org', 443, loop=self._loop, ssl=True)
+                self._streams[i] = reader, writer
+
+            writer.write(data)
+            await writer.drain()
+
+            length = None
+            while True:
+                line = await reader.readline()
+                if not line:
+                    raise ConnectionError('Connection closed')
+                elif length is None and line.startswith(b'Content-Length:'):
+                    length = int(line[16:-2])
+                elif line == b'\r\n':
+                    break
+
+            return await reader.read(length)
+        finally:
+            if i is not None:
+                self._busy_streams[i] = False
+
+            self._semaphore.release()
+
     async def init(self):
         pass
 
     async def _init(self):
-        self._reader, self._writer = await asyncio.open_connection(
-            'api.telegram.org', 443, loop=self._loop, ssl=True)
-
         self._running = True
         self._me = await self.getMe()
         self._cmd_triggers.clear()
@@ -408,12 +429,14 @@ class Bot:
             self._log.exception('unexpected error in subclassed disconnect')
 
         self._running = False
-        self._writer.close()
-        if sys.version_info >= (3, 7):
-            await self._writer.wait_closed()
 
-        self._writer = None
-        self._reader = None
+        for writer, _ in self._streams:
+            writer.close()
+            if sys.version_info >= (3, 7):
+                await writer.wait_closed()
+
+        self._streams = [None] * len(self._streams)
+        self._busy_streams = [False] * len(self._streams)
 
     async def __aenter__(self):
         await self._init()
