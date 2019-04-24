@@ -430,10 +430,12 @@ class Bot:
 
         self._running = False
 
-        for writer, _ in self._streams:
-            writer.close()
-            if sys.version_info >= (3, 7):
-                await writer.wait_closed()
+        for pair in self._streams:
+            if pair is not None:
+                writer = pair[1]
+                writer.close()
+                if sys.version_info >= (3, 7):
+                    await writer.wait_closed()
 
         self._streams = [None] * len(self._streams)
         self._busy_streams = [False] * len(self._streams)
