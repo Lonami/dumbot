@@ -159,7 +159,7 @@ def inline_button(pattern):
     >>> import dumbot
     >>>
     >>> class Bot(dumbot.Bot):
-    >>>     @dumbot.inline_button(r'day(\d+)')
+    >>>     @dumbot.inline_button(r'day(\\d+)')
     >>>     async def select_day(self, update, match):
     >>>         await self.sendMessage(chat_id=update.message.chat.id,
     >>>                                text=f'Selected day {match.group(1)}')
