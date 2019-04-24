@@ -307,8 +307,10 @@ class Bot:
     def run(self):
         if self._loop.is_running():
             return self._run()
-        else:
+        try:
             return self._loop.run_until_complete(self._run())
+        except KeyboardInterrupt:
+            return self._loop.run_until_complete(self._disconnect())
 
     async def _run(self):
         try:
@@ -334,9 +336,6 @@ class Bot:
                 else:
                     for update in updates:
                         self._loop.create_task(self._on_update(update))
-
-        except KeyboardInterrupt:
-            pass
         finally:
             await self._disconnect()
 
