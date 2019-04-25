@@ -173,6 +173,52 @@ def inline_button(pattern):
     return decorator
 
 
+def _encode_multipart(data, file):
+    boundary = base64.b64encode(uuid.uuid4().bytes)[:-2].decode('ascii')
+    buffer = io.BytesIO()
+    for key, value in data.items():
+        buffer.write(
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="{key}"\r\n'
+            '\r\n'
+            f'{value}\r\n'.encode('utf-8')
+        )
+
+    file_type = file['type']
+    name = file.get('name') or getattr(file['file'], 'name', None) or 'unnamed'
+    mime = file.get('mime') or mimetypes.guess_type(name)[0] or 'application/octet-stream'
+    buffer.write(
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="{file_type}"; filename="{name}"\r\n'
+        f'Content-Type: {mime}\r\n'
+        '\r\n'.encode('utf-8')
+    )
+
+    data = file['file']
+    if callable(getattr(data, 'read', None)):
+        data = data.read()
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+
+    buffer.write(data)
+    buffer.write(f'\r\n--{boundary}--'.encode('ascii'))
+    return (
+        f'Content-Type: multipart/form-data; boundary={boundary}\r\n'
+        f'Content-Length: {buffer.tell()}\r\n'
+    ), buffer.getvalue()
+
+
+def _encode_json(data):
+    if not data:
+        return '', b''
+
+    body = json_mod.dumps(data, ensure_ascii=True).encode('ascii')
+    return (
+        'Content-Type: application/json\r\n'
+        f'Content-Length: {len(body)}\r\n'
+    ), body
+
+
 class UnauthorizedError(ValueError):
     """Invalid bot token."""
 
@@ -232,50 +278,9 @@ class Bot:
             if file:
                 # TODO Albums may need multipart/mixed
                 # See https://www.w3.org/TR/html401/interact/forms.html#h-17.13.4.2
-                boundary = base64.b64encode(uuid.uuid4().bytes)[:-2].decode('ascii')
-                buffer = io.BytesIO()
-                for key, value in kwargs.items():
-                    buffer.write(
-                        f'--{boundary}\r\n'
-                        f'Content-Disposition: form-data; name="{key}"\r\n'
-                        '\r\n'
-                        f'{value}\r\n'.encode('utf-8')
-                    )
-
-                file_type = file['type']
-                name = file.get('name') or getattr(file['file'], 'name', None) or 'unnamed'
-                mime = file.get('mime') or mimetypes.guess_type(name)[0] or 'application/octet-stream'
-                buffer.write(
-                    f'--{boundary}\r\n'
-                    f'Content-Disposition: form-data; name="{file_type}"; filename="{name}"\r\n'
-                    f'Content-Type: {mime}\r\n'
-                    '\r\n'.encode('utf-8')
-                )
-
-                data = file['file']
-                if callable(getattr(data, 'read', None)):
-                    data = data.read()
-                if isinstance(data, str):
-                    data = data.encode('utf-8')
-
-                buffer.write(data)
-                buffer.write(f'\r\n--{boundary}--'.encode('ascii'))
-                body = buffer.getvalue()
-
-                headers = (
-                    f'Content-Type: multipart/form-data; boundary={boundary}\r\n'
-                    f'Content-Length: {len(body)}\r\n'
-                )
-
-            elif kwargs:
-                body = json_mod.dumps(kwargs, ensure_ascii=True).encode('ascii')
-                headers = (
-                    'Content-Type: application/json\r\n'
-                    f'Content-Length: {len(body)}\r\n'
-                )
+                headers, body = _encode_multipart(kwargs, file)
             else:
-                body = b''
-                headers = ''
+                headers, body = _encode_json(kwargs)
 
             data = await self._request(
                 f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
