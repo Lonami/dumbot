@@ -282,14 +282,13 @@ class Bot:
             else:
                 headers, body = _encode_json(kwargs)
 
-            data = await self._request(
-                f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
-                'Host: api.telegram.org\r\n'
-                f'{headers}'
-                '\r\n'.encode('ascii') + body)
-
             try:
-                deco = json_mod.loads(data)
+                deco = json_mod.loads(await self._request(
+                    f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
+                    'Host: api.telegram.org\r\n'
+                    f'{headers}'
+                    '\r\n'.encode('ascii') + body
+                ))
                 if deco['ok']:
                     deco = deco['result']
             except Exception as e:
@@ -391,12 +390,16 @@ class Bot:
                 updates = await self.getUpdates(
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
-                    if not isinstance(updates.error, asyncio.TimeoutError):
-                        if updates.error_code == 401:
-                            raise UnauthorizedError
+                    if isinstance(updates.error, (asyncio.CancelledError, ConnectionError)):
+                        if self._running:
+                            self._log.warning(
+                                'connection error when fetching updates')
+                        return
 
-                        self._log.warning('update result was not ok %s',
-                                          updates)
+                    if updates.error_code == 401:
+                        raise UnauthorizedError
+
+                    self._log.warning('update result was not ok %s', updates)
                     continue
                 if not updates:
                     continue
