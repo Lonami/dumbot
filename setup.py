@@ -15,7 +15,7 @@ try:
     setup(
         name='dumbot',
         packages=[PKG_DIR],
-        version='1.4.1',
+        version='1.4.2',
         description='dumb async telegram bot for python 3',
         author='Lonami Exo',
         author_email='totufals@hotmail.com',

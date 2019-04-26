@@ -372,13 +372,14 @@ class Bot:
         if not self._cmd_triggers or msg.forward_date:
             return
 
-        ent = msg.entities[0]
+        ent = (msg.entities or msg.caption_entities)[0]
+        txt = (msg.text or msg.caption) or ''
         if ent.offset == 0 and ent.type == 'bot_command':
-            cmd = msg.text[1:ent.length].lower()
+            cmd = txt[1:ent.length].casefold()
             usr = cmd.find('@')
             if usr == -1:
                 return self._cmd_triggers.get(cmd)
-            elif cmd[usr + 1:] == self._me.username.lower():
+            elif cmd[usr + 1:] == self._me.username.casefold():
                 return self._cmd_triggers.get(cmd[:usr])
 
     def _get_inb(self, data):
