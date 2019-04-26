@@ -254,7 +254,7 @@ class Bot:
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
         self._streams = [None] * max_connections
-        self._busy_streams = [False] * max_connections
+        self._busy_streams = [None] * max_connections
         self._semaphore = asyncio.Semaphore(max_connections, loop=self._loop)
         self._running = False
         self._cmd_triggers = {}
@@ -318,7 +318,7 @@ class Bot:
                 if not busy:
                     break  # the semaphore guarantees we will break at some point
 
-            self._busy_streams[i] = True
+            self._busy_streams[i] = asyncio.Task.current_task(loop=self._loop)
             if pair is not None:
                 reader, writer = pair
             else:
@@ -342,7 +342,7 @@ class Bot:
             return await reader.read(length)
         finally:
             if i is not None:
-                self._busy_streams[i] = False
+                self._busy_streams[i] = None
 
             self._semaphore.release()
 
@@ -378,10 +378,14 @@ class Bot:
     def run(self):
         if self._loop.is_running():
             return self._run()
+
+        task = self._loop.create_task(self._run())
         try:
-            return self._loop.run_until_complete(self._run())
+            return self._loop.run_until_complete(task)
         except KeyboardInterrupt:
-            return self._loop.run_until_complete(self._disconnect())
+            self._loop.run_until_complete(self._disconnect())
+            task.cancel()
+            self._loop.run_until_complete(task)
 
     async def _run(self):
         try:
@@ -411,6 +415,8 @@ class Bot:
                 else:
                     for update in updates:
                         self._loop.create_task(self._on_update(update))
+        except asyncio.CancelledError:
+            pass
         finally:
             await self._disconnect()
 
@@ -474,15 +480,20 @@ class Bot:
 
         self._running = False
 
-        for pair in self._streams:
+        for pair, task in zip(self._streams, self._busy_streams):
+            if task is not None:
+                task.cancel()
+                await task
+
             if pair is not None:
                 writer = pair[1]
                 writer.close()
                 if sys.version_info >= (3, 7):
+                    # TODO This takes forever (until we're done reading)
                     await writer.wait_closed()
 
         self._streams = [None] * len(self._streams)
-        self._busy_streams = [False] * len(self._streams)
+        self._busy_streams = [None] * len(self._streams)
 
     async def __aenter__(self):
         await self._init()
