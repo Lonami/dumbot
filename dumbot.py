@@ -241,17 +241,12 @@ class _Stream:
         wr.write(data)
         await wr.drain()
 
-        length = None
-        while True:
-            line = await rd.readline()
-            if not line:
-                raise ConnectionError('Connection closed')
-            elif length is None and line.startswith(b'Content-Length:'):
-                length = int(line[16:-2])
-            elif line == b'\r\n':
-                break
+        headers = await rd.readuntil(b'\r\n\r\n')
+        if headers[-4:] != b'\r\n\r\n':
+            raise ConnectionError('Connection closed')
 
-        return await rd.read(length)
+        index = headers.index(b'Content-Length:') + 16
+        return await rd.read(int(headers[index:headers.index(b'\r', index)]))
 
     async def close(self):
         self.wr.close()
