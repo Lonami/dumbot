@@ -23,6 +23,7 @@ SOFTWARE.
 """
 import asyncio
 import base64
+import itertools
 import logging
 import mimetypes
 import collections
@@ -292,6 +293,7 @@ class Bot:
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
         self._streams = collections.deque([None] * max_connections)
+        self._busy_streams = set()
         self._semaphore = asyncio.Semaphore(max_connections, loop=self._loop)
         self._running = False
         self._cmd_triggers = {}
@@ -357,12 +359,14 @@ class Bot:
         # constantly cycle through and use all connections.
         await self._semaphore.acquire()
         stream = self._streams.popleft()
+        self._busy_streams.add(stream)
         try:
             if stream is None:
                 stream = await _Stream.new(self._loop)
 
             return await stream.send(data)
         finally:
+            self._busy_streams.discard(stream)
             self._streams.append(stream)
             self._semaphore.release()
 
@@ -414,7 +418,9 @@ class Bot:
                 updates = await self.getUpdates(
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
-                    if isinstance(updates.error, (asyncio.CancelledError, ConnectionError)):
+                    if isinstance(updates.error, (
+                            asyncio.CancelledError, asyncio.IncompleteReadError,
+                            ConnectionError)):
                         if self._running:
                             self._log.warning(
                                 'connection error when fetching updates')
@@ -499,9 +505,11 @@ class Bot:
             self._log.exception('unexpected error in subclassed disconnect')
 
         self._running = False
-        await asyncio.gather(*(s.close() for s in self._streams if s))
+        await asyncio.gather(*(stream.close() for stream in itertools.chain(
+            self._streams, self._busy_streams) if stream))
+
         self._streams = collections.deque([None] * len(self._streams))
-        self._busy_streams = [None] * len(self._streams)
+        self._busy_streams.clear()
 
     async def __aenter__(self):
         await self._init()
