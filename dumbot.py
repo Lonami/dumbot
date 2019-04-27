@@ -175,20 +175,20 @@ def inline_button(pattern):
 
 def _encode_multipart(data, file):
     # We love micro-optimization! Concatenating to b'bytes' is the
-    # second fastest behind b''.join(tuple), so we have a mix of both.
+    # second fastest behind b''.join(tuple), so we return a list that
+    # we can b''.join() once at the end.
     #
     # Unfortunately, a lot of inputs are str and not bytes,
     # so we might as well use f-strings and a single encode step.
     # To make it worse, users may use characters only utf-8 can encode.
     boundary = base64.b64encode(uuid.uuid4().bytes)[:-2].decode('ascii')
-    buffer = b''
-    for key, value in data.items():
-        buffer += (
-            f'--{boundary}\r\n'
-            f'Content-Disposition: form-data; name="{key}"\r\n'
-            f'\r\n'
-            f'{value}\r\n'
-        ).encode('utf-8')
+    buffer = [
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="{key}"\r\n'
+        f'\r\n'
+        f'{value}\r\n'.encode('utf-8')
+        for key, value in data.items()
+    ]
 
     file_type = file['type']
     name = file.get('name') or getattr(file['file'], 'name', None) or 'unnamed'
@@ -200,8 +200,7 @@ def _encode_multipart(data, file):
     if isinstance(data, str):
         data = data.encode('utf-8')
 
-    buffer = b''.join((
-        buffer,
+    buffer.extend((
         f'--{boundary}\r\n'
         f'Content-Disposition: form-data; name="{file_type}"; filename="{name}"\r\n'
         f'Content-Type: {mime}\r\n'
@@ -212,7 +211,7 @@ def _encode_multipart(data, file):
 
     return (
         f'Content-Type: multipart/form-data; boundary={boundary}\r\n'
-        f'Content-Length: {len(buffer)}\r\n'
+        f'Content-Length: {sum(len(x) for x in buffer)}\r\n'
     ), buffer
 
 
@@ -224,7 +223,7 @@ def _encode_json(data):
     return (
         'Content-Type: application/json\r\n'
         f'Content-Length: {len(body)}\r\n'
-    ), body
+    ), [body]
 
 
 class UnauthorizedError(ValueError):
@@ -286,7 +285,7 @@ class Bot:
     """
     def __init__(self, token, *, timeout=10,
                  loop=None, sequential=False, max_connections=2):
-        self._token = token
+        self._post = f'POST /bot{token}/'.encode('ascii')
         self._timeout = timeout
         self._last_update = 0
         self._sequential = sequential
@@ -321,12 +320,17 @@ class Bot:
                 headers, body = _encode_json(kwargs)
 
             try:
-                deco = json_mod.loads(await self._request(
-                    f'POST /bot{self._token}/{method_name} HTTP/1.1\r\n'
-                    'Host: api.telegram.org\r\n'
-                    f'{headers}'
-                    '\r\n'.encode('ascii') + body
-                ))
+                # asyncio's writelines is just b''.join().
+                # We might as well just do that ourselves.
+                deco = json_mod.loads(await self._request(b''.join((
+                    self._post,
+                    method_name.encode('ascii'),
+                    b' HTTP/1.1\r\n'
+                    b'Host: api.telegram.org\r\n',
+                    headers.encode('ascii'),
+                    b'\r\n',
+                    *body
+                ))))
                 if deco['ok']:
                     deco = deco['result']
             except Exception as e:
