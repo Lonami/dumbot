@@ -26,6 +26,7 @@ import base64
 import io
 import logging
 import mimetypes
+import collections
 import re
 import sys
 import uuid
@@ -223,6 +224,42 @@ class UnauthorizedError(ValueError):
     """Invalid bot token."""
 
 
+class _Stream:
+    def __init__(self, pair):
+        self.rd, self.wr = pair
+
+    @classmethod
+    async def new(cls, loop):
+        return cls(await asyncio.open_connection(
+            'api.telegram.org', 443, loop=loop, ssl=True))
+
+    async def send(self, data):
+        # Member look-up is expensive
+        wr = self.wr
+        rd = self.rd
+
+        wr.write(data)
+        await wr.drain()
+
+        length = None
+        while True:
+            line = await rd.readline()
+            if not line:
+                raise ConnectionError('Connection closed')
+            elif length is None and line.startswith(b'Content-Length:'):
+                length = int(line[16:-2])
+            elif line == b'\r\n':
+                break
+
+        return await rd.read(length)
+
+    async def close(self):
+        self.wr.close()
+        if sys.version_info >= (3, 7):
+            # TODO This takes forever (until we're done reading)
+            await self.wr.wait_closed()
+
+
 class Bot:
     """
     Class to easily invoke Telegram API's bot methods.
@@ -253,8 +290,7 @@ class Bot:
         self._sequential = sequential
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
-        self._streams = [None] * max_connections
-        self._busy_streams = [None] * max_connections
+        self._streams = collections.deque([None] * max_connections)
         self._semaphore = asyncio.Semaphore(max_connections, loop=self._loop)
         self._running = False
         self._cmd_triggers = {}
@@ -311,39 +347,17 @@ class Bot:
         return request
 
     async def _request(self, data):
-        i = None
+        # Streams are stored in a deque, to make sure we
+        # constantly cycle through and use all connections.
         await self._semaphore.acquire()
+        stream = self._streams.popleft()
         try:
-            for i, (pair, busy) in enumerate(zip(self._streams, self._busy_streams)):
-                if not busy:
-                    break  # the semaphore guarantees we will break at some point
+            if stream is None:
+                stream = await _Stream.new(self._loop)
 
-            self._busy_streams[i] = asyncio.Task.current_task(loop=self._loop)
-            if pair is not None:
-                reader, writer = pair
-            else:
-                reader, writer = await asyncio.open_connection(
-                    'api.telegram.org', 443, loop=self._loop, ssl=True)
-                self._streams[i] = reader, writer
-
-            writer.write(data)
-            await writer.drain()
-
-            length = None
-            while True:
-                line = await reader.readline()
-                if not line:
-                    raise ConnectionError('Connection closed')
-                elif length is None and line.startswith(b'Content-Length:'):
-                    length = int(line[16:-2])
-                elif line == b'\r\n':
-                    break
-
-            return await reader.read(length)
+            return await stream.send(data)
         finally:
-            if i is not None:
-                self._busy_streams[i] = None
-
+            self._streams.append(stream)
             self._semaphore.release()
 
     async def init(self):
@@ -479,20 +493,8 @@ class Bot:
             self._log.exception('unexpected error in subclassed disconnect')
 
         self._running = False
-
-        for pair, task in zip(self._streams, self._busy_streams):
-            if task is not None:
-                task.cancel()
-                await task
-
-            if pair is not None:
-                writer = pair[1]
-                writer.close()
-                if sys.version_info >= (3, 7):
-                    # TODO This takes forever (until we're done reading)
-                    await writer.wait_closed()
-
-        self._streams = [None] * len(self._streams)
+        await asyncio.gather(*(s.close() for s in self._streams if s))
+        self._streams = collections.deque([None] * len(self._streams))
         self._busy_streams = [None] * len(self._streams)
 
     async def __aenter__(self):
