@@ -23,7 +23,6 @@ SOFTWARE.
 """
 import asyncio
 import base64
-import io
 import logging
 import mimetypes
 import collections
@@ -175,25 +174,25 @@ def inline_button(pattern):
 
 
 def _encode_multipart(data, file):
+    # We love micro-optimization! Concatenating to b'bytes' is the
+    # second fastest behind b''.join(tuple), so we have a mix of both.
+    #
+    # Unfortunately, a lot of inputs are str and not bytes,
+    # so we might as well use f-strings and a single encode step.
+    # To make it worse, users may use characters only utf-8 can encode.
     boundary = base64.b64encode(uuid.uuid4().bytes)[:-2].decode('ascii')
-    buffer = io.BytesIO()
+    buffer = b''
     for key, value in data.items():
-        buffer.write(
+        buffer += (
             f'--{boundary}\r\n'
             f'Content-Disposition: form-data; name="{key}"\r\n'
-            '\r\n'
-            f'{value}\r\n'.encode('utf-8')
-        )
+            f'\r\n'
+            f'{value}\r\n'
+        ).encode('utf-8')
 
     file_type = file['type']
     name = file.get('name') or getattr(file['file'], 'name', None) or 'unnamed'
     mime = file.get('mime') or mimetypes.guess_type(name)[0] or 'application/octet-stream'
-    buffer.write(
-        f'--{boundary}\r\n'
-        f'Content-Disposition: form-data; name="{file_type}"; filename="{name}"\r\n'
-        f'Content-Type: {mime}\r\n'
-        '\r\n'.encode('utf-8')
-    )
 
     data = file['file']
     if callable(getattr(data, 'read', None)):
@@ -201,12 +200,20 @@ def _encode_multipart(data, file):
     if isinstance(data, str):
         data = data.encode('utf-8')
 
-    buffer.write(data)
-    buffer.write(f'\r\n--{boundary}--'.encode('ascii'))
+    buffer = b''.join((
+        buffer,
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="{file_type}"; filename="{name}"\r\n'
+        f'Content-Type: {mime}\r\n'
+        f'\r\n'.encode('utf-8'),
+        data,
+        f'\r\n--{boundary}--'.encode('ascii')
+    ))
+
     return (
         f'Content-Type: multipart/form-data; boundary={boundary}\r\n'
-        f'Content-Length: {buffer.tell()}\r\n'
-    ), buffer.getvalue()
+        f'Content-Length: {len(buffer)}\r\n'
+    ), buffer
 
 
 def _encode_json(data):
