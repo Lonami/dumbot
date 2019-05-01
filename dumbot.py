@@ -283,9 +283,29 @@ class Bot:
         ...     print(message.chat.first_name)
         ...
         >>>
+
+    Arguments:
+
+        token (`str`):
+            The bot token to use.
+
+        timeout (`int`):
+            The timeout, in seconds, to use when fetching updates.
+
+        loop (`asyncio.AbstractEventLoop`, optional):
+            The asyncio event loop to use, or the default.
+
+        sequential (`bool`, optional):
+            Whether you want to process updates in sequential order
+            or not. The default is to spawn a task for each update.
+
+        max_connections (`int`, optional):
+            How many connections can be opened to Telegram servers.
+            `aiohttp` has a default of 100 maximum connections, but
+            the default value of 4 is reasonable too.
     """
     def __init__(self, token, *, timeout=10,
-                 loop=None, sequential=False, max_connections=2):
+                 loop=None, sequential=False, max_connections=4):
         self._post = f'POST /bot{token}/'.encode('ascii')
         self._timeout = timeout
         self._last_update = 0
