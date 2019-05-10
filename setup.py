@@ -25,8 +25,7 @@ try:
                      'Intended Audience :: Developers',
                      'License :: OSI Approved :: MIT License',
                      'Programming Language :: Python :: 3',
-                     'Topic :: Communications :: Chat'],
-        install_requires=['aiohttp'],
+                     'Topic :: Communications :: Chat']
     )
 finally:
     if os.path.isfile(BOT_SRC):

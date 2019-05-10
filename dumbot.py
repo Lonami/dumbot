@@ -22,11 +22,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import asyncio
-import io
+import base64
+import itertools
 import logging
+import mimetypes
+import collections
 import re
-
-import aiohttp
+import sys
+import uuid
 
 try:
     import ujson as json_mod
@@ -171,8 +174,92 @@ def inline_button(pattern):
     return decorator
 
 
+def _encode_multipart(data, file):
+    # We love micro-optimization! Concatenating to b'bytes' is the
+    # second fastest behind b''.join(tuple), so we return a list that
+    # we can b''.join() once at the end.
+    #
+    # Unfortunately, a lot of inputs are str and not bytes,
+    # so we might as well use f-strings and a single encode step.
+    # To make it worse, users may use characters only utf-8 can encode.
+    boundary = base64.b64encode(uuid.uuid4().bytes)[:-2].decode('ascii')
+    buffer = [
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="{key}"\r\n'
+        f'\r\n'
+        f'{value}\r\n'.encode('utf-8')
+        for key, value in data.items()
+    ]
+
+    file_type = file['type']
+    name = file.get('name') or getattr(file['file'], 'name', None) or 'unnamed'
+    mime = file.get('mime') or mimetypes.guess_type(name)[0] or 'application/octet-stream'
+
+    data = file['file']
+    if callable(getattr(data, 'read', None)):
+        data = data.read()
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+
+    buffer.extend((
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="{file_type}"; filename="{name}"\r\n'
+        f'Content-Type: {mime}\r\n'
+        f'\r\n'.encode('utf-8'),
+        data,
+        f'\r\n--{boundary}--'.encode('ascii')
+    ))
+
+    return (
+        f'Content-Type: multipart/form-data; boundary={boundary}\r\n'
+        f'Content-Length: {sum(len(x) for x in buffer)}\r\n'
+    ), buffer
+
+
+def _encode_json(data):
+    if not data:
+        return '', b''
+
+    body = json_mod.dumps(data, ensure_ascii=True).encode('ascii')
+    return (
+        'Content-Type: application/json\r\n'
+        f'Content-Length: {len(body)}\r\n'
+    ), [body]
+
+
 class UnauthorizedError(ValueError):
     """Invalid bot token."""
+
+
+class _Stream:
+    def __init__(self, pair):
+        self.rd, self.wr = pair
+
+    @classmethod
+    async def new(cls, loop):
+        return cls(await asyncio.open_connection(
+            'api.telegram.org', 443, loop=loop, ssl=True))
+
+    async def send(self, data):
+        # Member look-up is expensive
+        wr = self.wr
+        rd = self.rd
+
+        wr.write(data)
+        await wr.drain()
+
+        headers = await rd.readuntil(b'\r\n\r\n')
+        if headers[-4:] != b'\r\n\r\n':
+            raise ConnectionError('Connection closed')
+
+        index = headers.index(b'Content-Length:') + 16
+        return await rd.read(int(headers[index:headers.index(b'\r', index)]))
+
+    async def close(self):
+        self.wr.close()
+        if sys.version_info >= (3, 7):
+            # TODO This takes forever (until we're done reading)
+            await self.wr.wait_closed()
 
 
 class Bot:
@@ -196,15 +283,39 @@ class Bot:
         ...     print(message.chat.first_name)
         ...
         >>>
+
+    Arguments:
+
+        token (`str`):
+            The bot token to use.
+
+        timeout (`int`):
+            The timeout, in seconds, to use when fetching updates.
+
+        loop (`asyncio.AbstractEventLoop`, optional):
+            The asyncio event loop to use, or the default.
+
+        sequential (`bool`, optional):
+            Whether you want to process updates in sequential order
+            or not. The default is to spawn a task for each update.
+
+        max_connections (`int`, optional):
+            How many connections can be opened to Telegram servers.
+            `aiohttp` has a default of 100 maximum connections, but
+            the default value of 4 is reasonable too.
     """
-    def __init__(self, token, *, timeout=10, loop=None, sequential=False):
-        self._token = token
+    def __init__(self, token, *, timeout=10,
+                 loop=None, sequential=False, max_connections=4):
+        self._post = f'POST /bot{token}/'.encode('ascii')
         self._timeout = timeout
         self._last_update = 0
         self._sequential = sequential
         self._loop = loop or asyncio.get_event_loop()
         self._me = None
-        self._session = None
+        self._streams = collections.deque([None] * max_connections)
+        self._busy_streams = set()
+        self._semaphore = asyncio.Semaphore(max_connections, loop=self._loop)
+        self._running = False
         self._cmd_triggers = {}
         self._inb_triggers = []
         self._log = logging.getLogger(
@@ -223,36 +334,27 @@ class Bot:
         async def request(**kwargs):
             fp = None
             file = kwargs.pop('file', None)
-            if not file:
-                json = kwargs
-                data = None
+            if file:
+                # TODO Albums may need multipart/mixed
+                # See https://www.w3.org/TR/html401/interact/forms.html#h-17.13.4.2
+                headers, body = _encode_multipart(kwargs, file)
             else:
-                json = None
-                data = aiohttp.FormData()
-                for k, v in kwargs.items():
-                    data.add_field(k, str(v) if isinstance(v, int) else v)
+                headers, body = _encode_json(kwargs)
 
-                if not isinstance(file['file'], (
-                        io.IOBase, bytes, bytearray, memoryview)):
-                    file['file'] = fp = open(file['file'], 'rb')
-
-                data.add_field(
-                    file['type'],
-                    file['file'],
-                    filename=file.get('name'),
-                    content_type=file.get('mime')
-                )
-
-            url = 'https://api.telegram.org/bot{}/{}'\
-                  .format(self._token, method_name)
             try:
-                async with self._session.post(url,
-                                              json=json,
-                                              data=data,
-                                              timeout=self._timeout) as r:
-                    deco = await r.json()
-                    if deco['ok']:
-                        deco = deco['result']
+                # asyncio's writelines is just b''.join().
+                # We might as well just do that ourselves.
+                deco = json_mod.loads(await self._request(b''.join((
+                    self._post,
+                    method_name.encode('ascii'),
+                    b' HTTP/1.1\r\n'
+                    b'Host: api.telegram.org\r\n',
+                    headers.encode('ascii'),
+                    b'\r\n',
+                    *body
+                ))))
+                if deco['ok']:
+                    deco = deco['result']
             except Exception as e:
                 return Obj(ok=False, error_code=-1,
                            description=str(e), error=e)
@@ -272,14 +374,27 @@ class Bot:
 
         return request
 
+    async def _request(self, data):
+        # Streams are stored in a deque, to make sure we
+        # constantly cycle through and use all connections.
+        await self._semaphore.acquire()
+        stream = self._streams.popleft()
+        self._busy_streams.add(stream)
+        try:
+            if stream is None:
+                stream = await _Stream.new(self._loop)
+
+            return await stream.send(data)
+        finally:
+            self._busy_streams.discard(stream)
+            self._streams.append(stream)
+            self._semaphore.release()
+
     async def init(self):
         pass
 
     async def _init(self):
-        self._session = aiohttp.ClientSession(
-            loop=self._loop,
-            json_serialize=json_mod.dumps
-        )
+        self._running = True
         self._me = await self.getMe()
         self._cmd_triggers.clear()
         self._inb_triggers.clear()
@@ -307,10 +422,14 @@ class Bot:
     def run(self):
         if self._loop.is_running():
             return self._run()
+
+        task = self._loop.create_task(self._run())
         try:
-            return self._loop.run_until_complete(self._run())
+            return self._loop.run_until_complete(task)
         except KeyboardInterrupt:
-            return self._loop.run_until_complete(self._disconnect())
+            self._loop.run_until_complete(self._disconnect())
+            task.cancel()
+            self._loop.run_until_complete(task)
 
     async def _run(self):
         try:
@@ -319,12 +438,18 @@ class Bot:
                 updates = await self.getUpdates(
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
-                    if not isinstance(updates.error, asyncio.TimeoutError):
-                        if updates.error_code == 401:
-                            raise UnauthorizedError
+                    if isinstance(updates.error, (
+                            asyncio.CancelledError, asyncio.IncompleteReadError,
+                            ConnectionError)):
+                        if self._running:
+                            self._log.warning(
+                                'connection error when fetching updates')
+                        return
 
-                        self._log.warning('update result was not ok %s',
-                                          updates)
+                    if updates.error_code == 401:
+                        raise UnauthorizedError
+
+                    self._log.warning('update result was not ok %s', updates)
                     continue
                 if not updates:
                     continue
@@ -336,12 +461,10 @@ class Bot:
                 else:
                     for update in updates:
                         self._loop.create_task(self._on_update(update))
+        except asyncio.CancelledError:
+            pass
         finally:
             await self._disconnect()
-
-    @property
-    def _running(self):
-        return self._session and not self._session.closed
 
     async def _on_update(self, update):
         try:
@@ -394,22 +517,20 @@ class Bot:
         pass
 
     async def _disconnect(self):
+        if not self._running:
+            return
+
         try:
             await self.disconnect()
         except Exception:
             self._log.exception('unexpected error in subclassed disconnect')
 
-        await self._session.close()
-        self._session = None
+        self._running = False
+        await asyncio.gather(*(stream.close() for stream in itertools.chain(
+            self._streams, self._busy_streams) if stream))
 
-    def __del__(self):
-        try:
-            if self._session and not self._session.closed:
-                if self._session._connector_owner:
-                    self._session._connector.close()
-                self._session._connector = None
-        except Exception:
-            self._log.exception('failed to close connector')
+        self._streams = collections.deque([None] * len(self._streams))
+        self._busy_streams.clear()
 
     async def __aenter__(self):
         await self._init()
