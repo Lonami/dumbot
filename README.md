@@ -1,19 +1,15 @@
 # dumbot
+
 dumb async telegram bot for python 3.
 
-
 # installation
-install dependencies:
-```sh
-pip install aiohttp
-```
 
-then simply add `dumbot.py` to your project.
-
+add `dumbot.py` to your project or `pip install dumbot`.
 
 # usage
 
-### basic
+## basic
+
 ```python
 import asyncio
 from dumbot import Bot
@@ -31,7 +27,8 @@ loop = asyncio.get_event_loop()
 loop.run_until_complete(main())
 ```
 
-### files
+## files
+
 ```python
 
 async def main():
@@ -42,7 +39,8 @@ async def main():
     ))
 ```
 
-### updates
+## updates
+
 ```python
 async def on_update(update):
     await bot.sendMessage(
@@ -55,7 +53,8 @@ bot.on_update = on_update
 bot.run()
 ```
 
-### subclassing
+## subclassing
+
 ```python
 class Subbot(Bot):
     async def init(self):
@@ -70,28 +69,26 @@ class Subbot(Bot):
 Subbot(token).run()
 ```
 
-# extra
-if you're concerned about speed you can `pip install cchardet aiodns`
-as suggested in https://docs.aiohttp.org/en/stable/index.html.
-
-you may also want to `pip install ujson`
-to faster serialize outgoing requests.
-
 # faq
 
-### what methods are available?
+## what methods are available?
+
 https://core.telegram.org/bots/api.
 
-### can i send opened files or bytes directly?
+## can i send opened files or bytes directly?
+
 yes.
 
-### can i change a document's filename or mime?
+## can i change a document's filename or mime?
+
 yes, with `name` or `mime` fields in the `dict`.
 
-### how can i handle exceptions?
+## how can i handle exceptions?
+
 there aren't, simply check the `.ok` property.
 
-### what's the return value?
+## what's the return value?
+
 a magic object, accessing unknown properties returns a false-y magic object:
 
 ```python
@@ -104,7 +101,19 @@ lonami.friend.name = 'kate'
 print(lonami.friend)
 ```
 
-### what do you have against uppercase?
+## no dependencies?
+
+python alone is enough dependencies.
+
+## how does this work without urllib or aiohttp?
+
+it's simple, we construct http requests manually.
+
+## why would you reimplement http?
+
+it's a fun good learning experience, and avoids bloat dependencies.
+
+## what do you have against uppercase?
 
 scary. there would be less upper case if it weren't for
 python's naming conventions or telegram's for that matter.
