@@ -253,7 +253,7 @@ class _Stream:
             raise ConnectionError('Connection closed')
 
         index = headers.index(b'Content-Length:') + 16
-        return await rd.read(int(headers[index:headers.index(b'\r', index)]))
+        return await rd.readexactly(int(headers[index:headers.index(b'\r', index)]))
 
     async def close(self):
         self.wr.close()
