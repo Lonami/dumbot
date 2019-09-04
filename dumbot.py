@@ -344,7 +344,7 @@ class Bot:
             try:
                 # asyncio's writelines is just b''.join().
                 # We might as well just do that ourselves.
-                deco = json_mod.loads(await self._request(b''.join((
+                payload = await self._request(b''.join((
                     self._post,
                     method_name.encode('ascii'),
                     b' HTTP/1.1\r\n'
@@ -352,12 +352,18 @@ class Bot:
                     headers.encode('ascii'),
                     b'\r\n',
                     *body
-                ))))
+                )))
+            except Exception as e:
+                return Obj(ok=False, error_code=-1,
+                           description=str(e), error=e, payload=None)
+
+            try:
+                deco = json_mod.loads(payload)
                 if deco['ok']:
                     deco = deco['result']
             except Exception as e:
                 return Obj(ok=False, error_code=-1,
-                           description=str(e), error=e)
+                           description=str(e), error=e, payload=payload)
             else:
                 if isinstance(deco, dict):
                     deco['ok'] = deco.get('ok', True)
