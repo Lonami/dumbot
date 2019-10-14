@@ -448,8 +448,10 @@ class Bot:
                             asyncio.CancelledError, asyncio.IncompleteReadError,
                             ConnectionError)):
                         if self._running:
+                            e = updates.error
                             self._log.warning(
-                                'connection error when fetching updates')
+                                    'connection error when fetching updates (%s): %s',
+                                    e.__class__.__name__, e)
                         return
 
                     if updates.error_code == 401:
