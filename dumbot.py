@@ -498,7 +498,7 @@ class Bot:
         pass
 
     def _get_cmd(self, msg):
-        if not self._cmd_triggers or msg.forward_date:
+        if not self._cmd_triggers or (msg.forward_date and msg.chat.type != 'private'):
             return
 
         ent = (msg.entities or msg.caption_entities)[0]
