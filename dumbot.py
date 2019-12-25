@@ -445,8 +445,10 @@ class Bot:
                     offset=self._last_update + 1, timeout=self._timeout)
                 if not updates.ok:
                     if isinstance(updates.error, (
-                            asyncio.CancelledError, asyncio.IncompleteReadError,
-                            ConnectionError)):
+                            asyncio.CancelledError, asyncio.IncompleteReadError, OSError)):
+                        # OSError seen:
+                        # * ConnectionError
+                        # * socket.gaierror
                         if self._running:
                             e = updates.error
                             self._log.warning(
