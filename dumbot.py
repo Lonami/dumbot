@@ -291,6 +291,9 @@ class Bot:
 
         timeout (`int`):
             The timeout, in seconds, to use when fetching updates.
+        
+        test_mode (`bool`):
+            Use bot in test DC
 
         loop (`asyncio.AbstractEventLoop`, optional):
             The asyncio event loop to use, or the default.
@@ -305,8 +308,8 @@ class Bot:
             the default value of 4 is reasonable too.
     """
     def __init__(self, token, *, timeout=10,
-                 loop=None, sequential=False, max_connections=4):
-        self._post = f'POST /bot{token}/'.encode('ascii')
+                 loop=None, sequential=False, max_connections=4, test_mode=False):
+        self._post = f'POST /bot{token}/{"test/" if test_mode else ""}'.encode('ascii')
         self._timeout = timeout
         self._last_update = 0
         self._sequential = sequential
