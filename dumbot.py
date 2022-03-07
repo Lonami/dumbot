@@ -236,9 +236,9 @@ class _Stream:
         self.rd, self.wr = pair
 
     @classmethod
-    async def new(cls, loop):
+    async def new(cls):
         return cls(await asyncio.open_connection(
-            'api.telegram.org', 443, loop=loop, ssl=True))
+            'api.telegram.org', 443, ssl=True))
 
     async def send(self, data):
         # Member look-up is expensive
@@ -275,10 +275,9 @@ class Bot:
 
     For instance:
         >>> import asyncio
-        >>> rc = asyncio.get_event_loop().run_until_complete
         >>> bot = Bot(...)
         >>> print(bot.getMe())
-        >>> message = rc(bot.sendMessage(chat_id=10885151, text='Hi Lonami!'))
+        >>> message = asyncio.run(bot.sendMessage(chat_id=10885151, text='Hi Lonami!'))
         >>> if message.ok:
         ...     print(message.chat.first_name)
         ...
@@ -292,9 +291,6 @@ class Bot:
         timeout (`int`):
             The timeout, in seconds, to use when fetching updates.
 
-        loop (`asyncio.AbstractEventLoop`, optional):
-            The asyncio event loop to use, or the default.
-
         sequential (`bool`, optional):
             Whether you want to process updates in sequential order
             or not. The default is to spawn a task for each update.
@@ -305,16 +301,15 @@ class Bot:
             the default value of 4 is reasonable too.
     """
     def __init__(self, token, *, timeout=10,
-                 loop=None, sequential=False, max_connections=4):
+                 sequential=False, max_connections=4):
         self._post = f'POST /bot{token}/'.encode('ascii')
         self._timeout = timeout
         self._last_update = 0
         self._sequential = sequential
-        self._loop = loop or asyncio.get_event_loop()
         self._me = None
         self._streams = collections.deque([None] * max_connections)
         self._busy_streams = set()
-        self._semaphore = asyncio.Semaphore(max_connections, loop=self._loop)
+        self._semaphore = asyncio.Semaphore(max_connections)
         self._running = False
         self._cmd_triggers = {}
         self._inb_triggers = []
@@ -388,7 +383,7 @@ class Bot:
         self._busy_streams.add(stream)
         try:
             if stream is None:
-                stream = await _Stream.new(self._loop)
+                stream = await _Stream.new()
 
             return await stream.send(data)
         finally:
@@ -426,16 +421,17 @@ class Bot:
                     add_cmd(getattr(item, name))
 
     def run(self):
-        if self._loop.is_running():
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
             return self._run()
 
-        task = self._loop.create_task(self._run())
         try:
-            return self._loop.run_until_complete(task)
+            return asyncio.run(self._run())
         except KeyboardInterrupt:
-            self._loop.run_until_complete(self._disconnect())
-            task.cancel()
-            self._loop.run_until_complete(task)
+            asyncio.run(self._disconnect())
 
     async def _run(self):
         try:
@@ -470,7 +466,7 @@ class Bot:
                         await self._on_update(update)
                 else:
                     for update in updates:
-                        self._loop.create_task(self._on_update(update))
+                        asyncio.create_task(self._on_update(update))
         except asyncio.CancelledError:
             pass
         finally:
