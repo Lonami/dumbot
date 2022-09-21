@@ -317,14 +317,9 @@ class Bot:
             'dumbot{}'.format(token[:token.index(':')]))
 
     def __getattr__(self, method_name):
-        if not any(c.isupper() for c in method_name):
-            # All method calls are dynamic names. It's very easy to
-            # accidentally try to access a member (snake_case) that doesn't
-            # exist, but this method would swallow the error. All methods in
-            # the API have at least one upper-case letter in their name, so
-            # if the method name doesn't have one, the user probably accessed
-            # an attribute that doesn't exist yet. Let it raise.
-            return super().__getattribute__(method_name)
+        units = method_name.split('_')
+        units[1:] = [c.title() for c in units[1:]]
+        method_name = ''.join(units)
 
         async def request(**kwargs):
             fp = None
