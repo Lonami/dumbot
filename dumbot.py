@@ -532,8 +532,11 @@ class Bot:
             self._log.exception('unexpected error in subclassed disconnect')
 
         self._running = False
-        await asyncio.gather(*(stream.close() for stream in itertools.chain(
-            self._streams, self._busy_streams) if stream))
+        res = await asyncio.gather(*(stream.close() for stream in itertools.chain(
+            self._streams, self._busy_streams) if stream), return_exceptions=True)
+        for i, r in enumerate(res, start=1):
+            if isinstance(r, Exception):
+                self._log.error('unexpected error during shutdown in stream %d/%d: %s', i, len(res), r)
 
         self._streams = collections.deque([None] * len(self._streams))
         self._busy_streams.clear()
